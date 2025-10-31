@@ -1,0 +1,112 @@
+{
+  "title": "Dojo Bolt Gen v05",
+  "handle": "dojo-bolt-gen-v05",
+  "description": "Advanced bolt generation tool with customizable parameters for creating realistic bolts and fasteners in Blender.",
+  "vendor": "The Well Tarot",
+  "product_type": "Blender Add-on",
+  "tags": [
+    "bolt",
+    "generator",
+    "modeling",
+    "hardware",
+    "blender",
+    "addon",
+    "3d",
+    "asset"
+  ],
+  "status": "active",
+  "variants": [
+    {
+      "price": "0.00",
+      "sku": "NO3D-TOOLS-DOJO-BOLT-GEN-V05",
+      "inventory_policy": "continue",
+      "inventory_management": "shopify"
+    }
+  ],
+  "metafields": [
+    {
+      "namespace": "no3d_tools",
+      "key": "asset_type",
+      "value": "MESH",
+      "type": "single_line_text_field"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "blender_version",
+      "value": "4.0+",
+      "type": "single_line_text_field"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "export_date",
+      "value": "2025-10-26",
+      "type": "date"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "source_file",
+      "value": "test_asset.blend",
+      "type": "single_line_text_field"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "author",
+      "value": "NO3D Tools",
+      "type": "single_line_text_field"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "vertices",
+      "value": "1250",
+      "type": "number_integer"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "faces",
+      "value": "625",
+      "type": "number_integer"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "materials",
+      "value": "2",
+      "type": "number_integer"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "custom_bolt_diameter",
+      "value": "8.0",
+      "type": "number_decimal"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "custom_thread_pitch",
+      "value": "1.25",
+      "type": "number_decimal"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "custom_head_type",
+      "value": "hex",
+      "type": "single_line_text_field"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "catalog_name",
+      "value": "Test Catalog",
+      "type": "single_line_text_field"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "blend_file",
+      "value": "Dojo Bolt Gen v05.blend",
+      "type": "single_line_text_field"
+    },
+    {
+      "namespace": "no3d_tools",
+      "key": "thumbnail",
+      "value": "icon_Dojo Bolt Gen v05.png",
+      "type": "single_line_text_field"
+    }
+  ]
+}

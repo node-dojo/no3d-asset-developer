@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Blender
+*.blend1
+*.blend2
+
+# Environment
+.env
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build/distribution
+*.zip
+dist/
+build/
+
+# Node (if used)
+node_modules/
+
+# Logs
+*.log
