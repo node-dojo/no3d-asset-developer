@@ -25,7 +25,7 @@ copyright = [
 # folder, and spawns a headless Blender subprocess for the Template Append
 # (Method A) export pipeline.
 [permissions]
-files = "Export per-asset .blend files, thumbnails, and metadata to a chosen folder, and run a headless Blender subprocess for the Template Append pipeline."
+files = "Export asset .blend files, thumbnails, and metadata to disk"
 
 # Only ship what the add-on needs at runtime. Dev-only files (tests, demos,
 # planning docs, node dumps, marketing art) are intentionally excluded.
