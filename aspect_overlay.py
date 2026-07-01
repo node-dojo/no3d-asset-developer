@@ -48,16 +48,38 @@ log = logging.getLogger(__name__)
 # Built-in presets
 # ---------------------------------------------------------------------------
 #
-# (key, label, w, h, pref_visibility_attr)
+# (key, label, w, h, pref_visibility_attr, targets)
 #
-# These four are always present in the AddonPreferences UI as fixed
+# `targets` is the list of product-listing output assets this ratio serves
+# (from the Product Listing Assets Figma template). It is purely descriptive:
+# surfaced as a caption in the prefs UI so each overlay documents what real
+# export size it stands in for. Empty tuple = no product-listing target
+# (e.g. the social-only ratios).
+#
+# These presets are always present in the AddonPreferences UI as fixed
 # toggles -- the user can hide/show them but cannot delete them.
 
 BUILTIN_PRESETS = (
-    ("PORTRAIT_9_16",  "Portrait 9:16",  9,  16, "show_preset_9_16"),
-    ("FEED_4_5",       "Feed 4:5",       4,  5,  "show_preset_4_5"),
-    ("SQUARE_1_1",     "Square 1:1",     1,  1,  "show_preset_1_1"),
-    ("LANDSCAPE_16_9", "Landscape 16:9", 16, 9,  "show_preset_16_9"),
+    ("PORTRAIT_9_16",  "Portrait 9:16",  9,   16, "show_preset_9_16",   ()),
+    ("FEED_4_5",       "Feed 4:5",       4,   5,  "show_preset_4_5",    ()),
+    ("SQUARE_1_1",     "Square 1:1",     1,   1,  "show_preset_1_1",    (
+        "Gumroad Thumbnail (600×600)",
+        "no3dtools Product Icon — Master (512×512)",
+        "no3dtools Product Icon — Base (256×256)",
+    )),
+    ("LANDSCAPE_16_9", "Landscape 16:9", 16,  9,  "show_preset_16_9",   (
+        "Gumroad Cover (1280×720)",
+        "Gumroad Gallery 1/2/3 (1280×720)",
+    )),
+    ("HERO_4_3",       "Hero/Banner 4:3", 4,  3,  "show_preset_4_3",    (
+        "no3dtools Hero / Banner (960×720)",
+    )),
+    # 1200×630 reduces exactly to 40:21 (≈1.905); labelled "1.91:1" per the
+    # OG/Twitter convention, but the overlay rectangle uses the true frame ratio.
+    ("SOCIAL_OG_1_91", "Social/OG 1.91:1", 40, 21, "show_preset_og_1_91", (
+        "Gumroad Social / OG (1200×630)",
+        "no3dtools Social / OG (1200×630)",
+    )),
 )
 
 
@@ -180,7 +202,7 @@ def _enabled_presets():
     prefs = _addon_prefs()
     if prefs is None:
         return out
-    for _key, label, w, h, attr in BUILTIN_PRESETS:
+    for _key, label, w, h, attr, _targets in BUILTIN_PRESETS:
         if getattr(prefs, attr, True):
             out.append((label, int(w), int(h)))
     # Custom presets
@@ -1068,8 +1090,15 @@ def draw_aspect_overlay_section(layout, context):
     )
     if prefs.aspect_section_builtin_expanded:
         col = bi_box.column(align=True)
-        for _key, label, _w, _h, attr in BUILTIN_PRESETS:
+        for _key, label, _w, _h, attr, targets in BUILTIN_PRESETS:
             col.prop(prefs, attr, text=label)
+            # Descriptive captions: which product-listing exports this ratio serves.
+            if targets:
+                cap = col.column(align=True)
+                cap.enabled = False
+                cap.scale_y = 0.72
+                for t in targets:
+                    cap.label(text=f"      → {t}")
 
     # Custom presets (collapsible)
     cu_box = layout.box()

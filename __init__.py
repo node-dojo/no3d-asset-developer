@@ -245,6 +245,22 @@ class NO3D_AddonPreferences(AddonPreferences):
         description="Draw the 16:9 preset rectangle in the overlay",
         default=True,
     )
+    show_preset_4_3: BoolProperty(
+        name="Show Hero/Banner 4:3",
+        description=(
+            "Draw the 4:3 preset rectangle in the overlay. Product-listing "
+            "target: no3dtools Hero / Banner (960×720)"
+        ),
+        default=True,
+    )
+    show_preset_og_1_91: BoolProperty(
+        name="Show Social/OG 1.91:1",
+        description=(
+            "Draw the 1.91:1 (1200×630) preset rectangle in the overlay. "
+            "Product-listing target: Gumroad & no3dtools Social / OG image"
+        ),
+        default=True,
+    )
     aspect_custom_presets: CollectionProperty(
         type=aspect_overlay.NO3D_AspectCustomPreset,
         name="Custom Aspect Presets",
