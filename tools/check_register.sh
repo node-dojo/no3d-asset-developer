@@ -1,13 +1,19 @@
 #!/bin/bash
 # check_register.sh — headless proof that the add-on enables cleanly and its
-# key surfaces are registered. Installs the current working tree as a temp
-# extension into a throwaway Blender config, enables it, asserts, tears down.
+# key surfaces are registered. Registers the working tree directly via a
+# symlinked import (bypassing Blender's extension install path for speed),
+# asserts, tears down.
+#
+# Uses --factory-startup so the user's normal enabled add-ons do NOT load —
+# headless Blender + user add-ons often hangs (modal popups, threads, or
+# network calls inside someone's register()). Only this add-on is registered.
 #
 # Usage:  tools/check_register.sh
+# Env:    BLENDER (path to Blender binary; defaults to 5.2 Beta.app)
 # Exit 0 + "REGISTER_OK" on success; non-zero + traceback on failure.
 set -euo pipefail
 
-BLENDER="/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender"
+BLENDER="${BLENDER:-/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender}"
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 
 "$BLENDER" --factory-startup --background --python-expr "
