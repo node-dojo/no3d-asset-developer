@@ -14,13 +14,15 @@
 - **Project venv:** `.venv/` at the worktree root. `blmcp` + `pytest` + `pyyaml` installed. **All `pytest` and `python` commands in tasks must use `.venv/bin/python -m pytest ...` / `.venv/bin/python ...`** (system Python has no `blmcp`).
 - **`blmcp` pin (resolved SHA):** `98b0e49d98321d321c7e631389200f513f765d59` — use this in Task 7's `<PINNED_REF>`. Installed as `blender-mcp @ git+https://projects.blender.org/lab/blender_mcp.git@98b0e49d98321d321c7e631389200f513f765d59#subdirectory=mcp`.
 - **Seam pre-validated against this SHA:** `get_connection_params()` is 0-arg; `send_code` calls it unqualified; 17 tools name-bind `send_code`. The patch strategy is confirmed sound before implementation.
-- **`claude_pair` import:** Tasks 1 & 5 do `from claude_pair import registry/pair`. The worktree root (repo root) must be on `sys.path` for this to resolve — run pytest from the worktree root (conftest or `pip install -e .` not required; `PYTHONPATH=.` or running from root suffices). Add a `tests/conftest.py` inserting the repo root if needed.
+- **No `claude_pair` import anywhere.** Agent Bridge is standalone (see Global Constraints). `agent_bridge` and its tests import only `agent_bridge.*`, `blmcp`, and stdlib. Run pytest from the worktree root with `.venv/bin/python -m pytest` (`pytest.ini` sets `pythonpath = .` and `--import-mode=importlib`).
 
 ## Global Constraints
 
 - **Do NOT fork/vendor `blmcp`.** Depend on it as a library, pinned to a git ref. Package is `blender-mcp` installed from `https://projects.blender.org/lab/blender_mcp.git` subdirectory `mcp` (currently `1.0.0`).
 - **Patch exactly one seam:** `blmcp.tools_helpers.connection.get_connection_params`. Never patch `send_code` (17 tools name-bind it at import; the patch would not land). `send_code` calls `get_connection_params()` unqualified at call time (`connection.py:44`), so patching that function lands for all tools.
-- **Reuse the existing registry** at `~/.blender-pairs/<pid>.json` (`claude_pair/registry.py`). Do not invent a second registry format.
+- **Agent Bridge is STANDALONE. It does NOT import or depend on `claude_pair`.** Claude Pair is a code-guidance reference only. Agent Bridge ships its **own bpy-free `registry.py`** (its own copy of the logic). The MCP resolver runs headlessly (no Blender), so nothing Agent Bridge imports may `import bpy` at module load — `claude_pair/__init__.py` does, which is exactly why we do not import it.
+- **Registry on-disk format is shared** at `~/.blender-pairs/<pid>.json` (same directory + JSON shape any writer uses), so Agent Bridge interoperates with other writers by *format*, not by *code*. Do not invent a different format.
+- **`conftest.py` / bpy-mock:** Agent Bridge's own modules (`registry.py`, `resolver.py`, `bridge_server.py`, `bridge_tools.py`) are all bpy-free and import cleanly headlessly — tests need NO bpy mock and NO file-renaming tricks. Only `agent_bridge/__init__.py` (Task 5) touches `bpy`, and it guards the import with `try/except ImportError`. If pytest tries to import the repo-root add-on package during collection, isolate with a `tests/agent_bridge/conftest.py` that does `collect_ignore` or set `pytest.ini` `rootdir`/`testpaths = tests` + `--import-mode=importlib`. NEVER rename repo files at test time.
 - **Address key is the `.blend` filename stem** (case-insensitive, extension optional).
 - **Ambiguity (same file open twice) → refuse and list PIDs.** Never silently guess.
 - **Default target when none set:** exactly-one-live → use it; zero → error; >1 → refuse and list. Never guess among several.
@@ -40,7 +42,8 @@ New subpackage `agent_bridge/` in the repo root (sibling to `claude_pair/`):
 | `agent_bridge/__init__.py` | Blender add-on side: `register()`/`unregister()`, the serve+register operator, panel button. |
 | `agent_bridge/resolver.py` | Pure resolver: given registry state + sticky target, return `(host, port)` or raise. No `blmcp`, no `bpy`. |
 | `agent_bridge/bridge_server.py` | Agent-side MCP entry point: monkeypatch, register `use_instance`/`list_instances`, run `blmcp.main()`. |
-| `agent_bridge/registry.py` | Thin re-export/extension of `claude_pair.registry` (shared format) with the `blendfile_stem` helper. |
+| `agent_bridge/registry.py` | Standalone bpy-free registry: owns `~/.blender-pairs/<pid>.json` access + `blendfile_stem`/`live_instances`. No `claude_pair` import. |
+| `agent_bridge/serve_helpers.py` | Agent Bridge's own port-finding + official-MCP-addon control (bpy imported lazily inside functions). |
 | `tests/agent_bridge/test_resolver.py` | Unit tests for resolver (table-driven, no Blender). |
 | `tests/agent_bridge/test_coupling_smoke.py` | Smoke test: upstream seam intact + patch lands. |
 | `pyproject.toml` (or equivalent) | Declares the `agent-bridge` console script + pinned `blender-mcp` git dep. |
@@ -49,22 +52,51 @@ Resolver is deliberately `bpy`-free and `blmcp`-free so it is unit-testable agai
 
 ---
 
-### Task 1: Shared registry helper (`blendfile_stem`)
+### Task 1: Self-contained registry module
+
+Agent Bridge's OWN registry access — a bpy-free module owning the
+`~/.blender-pairs/<pid>.json` format. NO `claude_pair` import.
 
 **Files:**
+- Create: `agent_bridge/__init__.py` (minimal package marker for now; Task 5 replaces its body with the Blender-side code — keep it importable and bpy-free here)
 - Create: `agent_bridge/registry.py`
-- Test: `tests/agent_bridge/test_resolver.py` (created here, reused Task 2)
+- Create: `tests/agent_bridge/__init__.py` (empty, for collection)
+- Create: `tests/agent_bridge/test_registry.py`
+- Create/verify: `pytest.ini` at worktree root (tracked)
 
 **Interfaces:**
-- Consumes: `claude_pair/registry.py` (`REGISTRY_DIR`, `read`, `write`, `remove`, `list_all`, `gc_dead`).
+- Consumes: nothing (stdlib only — `json`, `os`, `time`, `pathlib`).
 - Produces:
-  - `live_instances() -> list[dict]` — `gc_dead()` first, then `list_all()`; each dict has at least `blender_pid`, `port`, `host`, `blendfile`, `blendfile_stem`.
-  - `stem_of(entry: dict) -> str` — returns `entry["blendfile_stem"]` if present, else derives from `entry["blendfile"]` (Path.stem), else `""`.
+  - `REGISTRY_DIR: Path` = `~/.blender-pairs`
+  - `write(pid: int, data: dict) -> Path`, `read(pid: int) -> dict | None`, `remove(pid: int) -> bool`, `list_all() -> list[dict]`, `gc_dead() -> list[int]`
+  - `live_instances() -> list[dict]` — `gc_dead()` then `list_all()`.
+  - `stem_of(entry: dict) -> str` — `entry["blendfile_stem"]` if present, else `Path(entry["blendfile"]).stem`, else `""`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Create package markers + pytest config**
 
 ```python
-# tests/agent_bridge/test_resolver.py
+# agent_bridge/__init__.py
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Agent Bridge: route Claude agent Blender calls to the right live instance."""
+```
+
+```python
+# tests/agent_bridge/__init__.py
+```
+(empty file)
+
+```ini
+# pytest.ini  (worktree root)
+[pytest]
+testpaths = tests
+addopts = --import-mode=importlib
+pythonpath = .
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+```python
+# tests/agent_bridge/test_registry.py
 from agent_bridge import registry as reg
 
 def test_stem_of_prefers_explicit_field():
@@ -75,30 +107,119 @@ def test_stem_of_derives_from_blendfile_when_no_stem():
 
 def test_stem_of_empty_when_nothing():
     assert reg.stem_of({}) == ""
+
+def test_write_read_remove_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(reg, "REGISTRY_DIR", tmp_path)
+    reg.write(4242, {"port": 9877, "blendfile": "/x/resin.blend"})
+    got = reg.read(4242)
+    assert got["port"] == 9877 and got["blender_pid"] == 4242
+    assert reg.remove(4242) is True
+    assert reg.read(4242) is None
+
+def test_list_all_reads_multiple(tmp_path, monkeypatch):
+    monkeypatch.setattr(reg, "REGISTRY_DIR", tmp_path)
+    reg.write(1, {"port": 9877})
+    reg.write(2, {"port": 9878})
+    ports = sorted(e["port"] for e in reg.list_all())
+    assert ports == [9877, 9878]
+
+def test_gc_dead_removes_dead_pids(tmp_path, monkeypatch):
+    monkeypatch.setattr(reg, "REGISTRY_DIR", tmp_path)
+    # A PID that cannot exist (very large) is treated as dead.
+    reg.write(999999999, {"port": 9877})
+    cleaned = reg.gc_dead()
+    assert 999999999 in cleaned
+    assert reg.read(999999999) is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 3: Run tests to verify they fail**
 
-Run: `pytest tests/agent_bridge/test_resolver.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agent_bridge'` (or `AttributeError: stem_of`).
+Run: `.venv/bin/python -m pytest tests/agent_bridge/test_registry.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'agent_bridge.registry'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 4: Write minimal implementation**
 
 ```python
 # agent_bridge/registry.py
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Shared pair-registry access for Agent Bridge (reuses claude_pair's format)."""
+"""Agent Bridge's own registry: JSON files at ~/.blender-pairs/<pid>.json.
 
+Standalone and bpy-free (runs in the headless MCP subprocess). Shares only the
+on-disk FORMAT with other writers — no code dependency on any Blender add-on.
+"""
+
+import json
+import os
+import time
 from pathlib import Path
 
-from claude_pair import registry as _base
+REGISTRY_DIR = Path.home() / ".blender-pairs"
 
-REGISTRY_DIR = _base.REGISTRY_DIR
-read = _base.read
-write = _base.write
-remove = _base.remove
-list_all = _base.list_all
-gc_dead = _base.gc_dead
+
+def _path_for_pid(pid: int) -> Path:
+    return REGISTRY_DIR / f"{pid}.json"
+
+
+def write(pid: int, data: dict) -> Path:
+    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    path = _path_for_pid(pid)
+    payload = dict(data)
+    payload.setdefault("blender_pid", pid)
+    payload.setdefault("started_at", time.time())
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
+def read(pid: int) -> dict | None:
+    path = _path_for_pid(pid)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def remove(pid: int) -> bool:
+    try:
+        _path_for_pid(pid).unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def list_all() -> list[dict]:
+    if not REGISTRY_DIR.exists():
+        return []
+    out = []
+    for path in sorted(REGISTRY_DIR.glob("*.json")):
+        try:
+            out.append(json.loads(path.read_text()))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return out
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def gc_dead() -> list[int]:
+    cleaned = []
+    for entry in list_all():
+        pid = entry.get("blender_pid")
+        if not isinstance(pid, int):
+            continue
+        if not _pid_alive(pid):
+            if remove(pid):
+                cleaned.append(pid)
+    return cleaned
 
 
 def stem_of(entry: dict) -> str:
@@ -116,16 +237,16 @@ def live_instances() -> list[dict]:
     return list_all()
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 5: Run tests to verify they pass**
 
-Run: `pytest tests/agent_bridge/test_resolver.py -v`
-Expected: PASS (3 passed).
+Run: `.venv/bin/python -m pytest tests/agent_bridge/test_registry.py -v`
+Expected: PASS (7 passed).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add agent_bridge/registry.py tests/agent_bridge/test_resolver.py
-git commit -m "feat(agent-bridge): shared registry helper with blendfile_stem"
+git add agent_bridge/__init__.py agent_bridge/registry.py tests/agent_bridge/__init__.py tests/agent_bridge/test_registry.py pytest.ini
+git commit -m "feat(agent-bridge): standalone bpy-free registry module"
 ```
 
 ---
@@ -136,7 +257,7 @@ This is the heart of Agent Bridge. Pure function over registry state; no `bpy`, 
 
 **Files:**
 - Create: `agent_bridge/resolver.py`
-- Test: `tests/agent_bridge/test_resolver.py` (append)
+- Test: `tests/agent_bridge/test_resolver.py` (new file)
 
 **Interfaces:**
 - Consumes: `agent_bridge.registry.live_instances()`, `stem_of()`.
@@ -153,7 +274,7 @@ This is the heart of Agent Bridge. Pure function over registry state; no `bpy`, 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# tests/agent_bridge/test_resolver.py  (append)
+# tests/agent_bridge/test_resolver.py
 import pytest
 from agent_bridge import resolver as R
 
@@ -572,13 +693,100 @@ Makes each Blender write its live socket + `.blend` stem into the registry so th
 - Test: `tests/agent_bridge/test_register_payload.py` (pure-Python part only; operator body is smoke-run manually in Blender).
 
 **Interfaces:**
-- Consumes: `agent_bridge.registry.write`, `claude_pair.pair` (`find_free_port`, `start_official_mcp_on_port`, `is_official_mcp_running`).
+- Consumes: `agent_bridge.registry` (`write`, `remove`, `read`, `live_instances`, `stem_of`), `agent_bridge.serve_helpers` (its OWN port/MCP helpers — see Step 0). NO `claude_pair` import.
 - Produces:
   - `build_register_payload(pid, port, host, blendfile) -> dict` — pure function returning the registry entry (incl. `blendfile_stem`). Unit-tested.
   - `AGENT_BRIDGE_OT_serve` operator (`agent_bridge.serve`): pick free port → start official MCP server on it → write registry entry.
   - `AGENT_BRIDGE_OT_stop` operator: stop server + remove registry entry.
   - `AGENT_BRIDGE_PT_panel` in the `Claude` category with Serve/Stop + a live-instance readout.
   - `register()` / `unregister()`.
+
+- [ ] **Step 0: Create Agent Bridge's own serve helpers (no claude_pair)**
+
+`serve_helpers.py` owns port-finding and official-MCP-addon control. It imports
+`bpy` only inside functions (never at module load), so the module itself stays
+importable headlessly; the operator calls run only inside Blender.
+
+```python
+# agent_bridge/serve_helpers.py
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Agent Bridge's own port allocation + official Blender MCP add-on control.
+
+bpy and the official MCP add-on are imported lazily inside functions so this
+module imports cleanly outside Blender (the package __init__ imports it via the
+_HAS_BPY guard; tests never call these functions)."""
+
+import socket
+
+PORT_BASE = 9876
+PORT_MAX = 9999
+
+# Package keys the official Blender MCP add-on may be installed under.
+OFFICIAL_MCP_PKG_CANDIDATES = (
+    "bl_ext.lab_blender_org.mcp",
+    "bl_ext.blender_org.mcp",
+    "bl_ext.user_default.mcp",
+    "mcp",
+)
+
+
+def find_free_port(start: int = PORT_BASE, end: int = PORT_MAX, host: str = "localhost") -> int:
+    for port in range(start, end + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.1)
+            try:
+                s.bind((host, port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError(f"No free port in {start}-{end}")
+
+
+def official_mcp_prefs():
+    import bpy
+    addons = bpy.context.preferences.addons
+    for key in OFFICIAL_MCP_PKG_CANDIDATES:
+        if key in addons:
+            return addons[key].preferences
+    for key in addons.keys():
+        if key.endswith(".mcp") or key == "mcp":
+            return addons[key].preferences
+    raise RuntimeError(
+        "Official Blender MCP add-on not found. Install it from the Blender Lab "
+        "extensions repository and enable it."
+    )
+
+
+def is_official_mcp_running() -> bool:
+    try:
+        from bl_ext.lab_blender_org.mcp import mcp_to_blender_server  # type: ignore
+        return mcp_to_blender_server.is_running()
+    except (ImportError, AttributeError):
+        pass
+    try:
+        from mcp import mcp_to_blender_server  # type: ignore
+        return mcp_to_blender_server.is_running()
+    except (ImportError, AttributeError):
+        return False
+
+
+def start_official_mcp_on_port(port: int, host: str = "localhost") -> None:
+    import bpy
+    prefs = official_mcp_prefs()
+    if is_official_mcp_running():
+        bpy.ops.blmcp.server_stop()
+    prefs.host = host
+    prefs.port = port
+    result = bpy.ops.blmcp.server_start()
+    if "FINISHED" not in result:
+        raise RuntimeError(f"Failed to start MCP server on {host}:{port} (result={result})")
+
+
+def stop_official_mcp() -> None:
+    import bpy
+    if is_official_mcp_running():
+        bpy.ops.blmcp.server_stop()
+```
 
 - [ ] **Step 1: Write the failing test (pure payload builder)**
 
@@ -602,7 +810,7 @@ def test_payload_stem_empty_for_unsaved():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/agent_bridge/test_register_payload.py -v`
+Run: `.venv/bin/python -m pytest tests/agent_bridge/test_register_payload.py -v`
 Expected: FAIL — `ImportError: cannot import name 'build_register_payload'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -640,7 +848,7 @@ except ImportError:
 
 if _HAS_BPY:
     from . import registry as reg
-    from claude_pair import pair as pair_mod
+    from . import serve_helpers as sh
 
     _PID = os.getpid()
 
@@ -654,11 +862,11 @@ if _HAS_BPY:
             del context
             prefs_host = "localhost"
             try:
-                if not pair_mod.is_official_mcp_running():
-                    port = pair_mod.find_free_port(host=prefs_host)
-                    pair_mod.start_official_mcp_on_port(port, host=prefs_host)
+                if not sh.is_official_mcp_running():
+                    port = sh.find_free_port(host=prefs_host)
+                    sh.start_official_mcp_on_port(port, host=prefs_host)
                 else:
-                    port = pair_mod.official_mcp_prefs().port
+                    port = sh.official_mcp_prefs().port
             except Exception as ex:  # pylint: disable=broad-exception-caught
                 self.report({"ERROR"}, f"Could not start MCP server: {ex}")
                 return {"CANCELLED"}
@@ -676,7 +884,7 @@ if _HAS_BPY:
         def execute(self, context):
             del context
             try:
-                pair_mod.stop_official_mcp()
+                sh.stop_official_mcp()
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
             reg.remove(_PID)
