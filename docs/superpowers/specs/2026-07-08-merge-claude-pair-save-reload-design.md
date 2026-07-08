@@ -54,9 +54,13 @@ source add-ons define their own. Resolution:
     `auto_write_permissions`, `mcp_host`, `port_range_start`, `port_range_end`,
     `start_server_on_load`, `iterm_open_as`, `iterm_profile`, `verbose_logging`
 - **Rewrite each module's `get_prefs()` / `_prefs()`** to read the host add-on's prefs
-  (`context.preferences.addons[<host package>].preferences`) instead of their own.
-  The host package name is available to submodules as `__package__.split(".")[0]` or by
-  importing a shared constant.
+  instead of their own. Since these modules live in **subpackages**, their `__package__`
+  is e.g. `bl_ext.user_default.no3d_asset_developer.claude_pair` — so the host key is
+  `__package__.rsplit(".", 1)[0]`. Resolve once at module load into a `HOST_PACKAGE`
+  constant, then `bpy.context.preferences.addons[HOST_PACKAGE].preferences`.
+
+  (Contrast: top-level sibling modules like `editor_screenshot.py` use bare `__package__`
+  because for them it already equals the host package. Subpackage depth is the difference.)
 
 ### What gets dropped
 
@@ -68,6 +72,11 @@ disable/remove the *host* add-on, which is nonsensical when Claude Pair is a sub
 Their two buttons are removed from the folded preferences UI. Everything else (Pair Now,
 Re-pair & Resume, New Session, Reveal, Agentic Layout, Unpair, diagnostics, doc editors,
 permissions dropper) carries over unchanged.
+
+Every remaining `__package__` reference in the copied Claude Pair code must be audited:
+the prefs `bl_idname` moves to the host's `NO3D_AddonPreferences` (so Claude Pair's own
+prefs class is deleted), and `_prefs()` uses `HOST_PACKAGE` as above. No copied operator
+may key off its own package name.
 
 ## UI placement
 
