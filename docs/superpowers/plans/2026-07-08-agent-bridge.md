@@ -8,6 +8,14 @@
 
 **Tech Stack:** Python 3.12, `bpy` (Blender add-on side), upstream `blmcp` (`blender-mcp` from git), `pytest`.
 
+## Execution Environment (resolved at setup)
+
+- **Worktree:** `.claude/worktrees/agent-bridge` on branch `worktree-agent-bridge` (branched from `main` @ `f66fecc`).
+- **Project venv:** `.venv/` at the worktree root. `blmcp` + `pytest` + `pyyaml` installed. **All `pytest` and `python` commands in tasks must use `.venv/bin/python -m pytest ...` / `.venv/bin/python ...`** (system Python has no `blmcp`).
+- **`blmcp` pin (resolved SHA):** `98b0e49d98321d321c7e631389200f513f765d59` — use this in Task 7's `<PINNED_REF>`. Installed as `blender-mcp @ git+https://projects.blender.org/lab/blender_mcp.git@98b0e49d98321d321c7e631389200f513f765d59#subdirectory=mcp`.
+- **Seam pre-validated against this SHA:** `get_connection_params()` is 0-arg; `send_code` calls it unqualified; 17 tools name-bind `send_code`. The patch strategy is confirmed sound before implementation.
+- **`claude_pair` import:** Tasks 1 & 5 do `from claude_pair import registry/pair`. The worktree root (repo root) must be on `sys.path` for this to resolve — run pytest from the worktree root (conftest or `pip install -e .` not required; `PYTHONPATH=.` or running from root suffices). Add a `tests/conftest.py` inserting the repo root if needed.
+
 ## Global Constraints
 
 - **Do NOT fork/vendor `blmcp`.** Depend on it as a library, pinned to a git ref. Package is `blender-mcp` installed from `https://projects.blender.org/lab/blender_mcp.git` subdirectory `mcp` (currently `1.0.0`).
