@@ -16,8 +16,12 @@
 - **Prefs single-owner:** exactly one `AddonPreferences` (`NO3D_AddonPreferences`) in the whole add-on. No copied module may define a second one.
 - **Host prefs key in subpackages:** `HOST_PACKAGE = __package__.rsplit(".", 1)[0]`; read `bpy.context.preferences.addons[HOST_PACKAGE].preferences`. Never bare `__package__` inside a subpackage, never hardcode `"no3d_asset_developer"`.
 - **Dropped operators:** Claude Pair's `CLAUDE_PAIR_OT_reload` and `CLAUDE_PAIR_OT_uninstall` do NOT carry over (they disable/remove the host add-on).
-- **Blender CLI for verification:** `/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender`, always invoked with `--factory-startup --background`.
+- **Blender CLI for verification:** default `/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender`, but every script honors `${BLENDER:-<default>}` so this doesn't lock us to the beta path. Always invoked with `--factory-startup --background`.
+- **Headless-with-addons gotcha:** headless Blender launched with the user's normal add-ons enabled often hangs (an add-on's `register()` opens a modal, spawns a thread, hits the network, etc.). `--factory-startup` is the mitigation — it loads no user prefs and therefore no user-enabled add-ons. Every headless invocation in this plan uses it and directly `register()`s only this add-on.
 - **No secrets, no network calls in tests.** The register-check never pairs or ships.
+- **Verification assertions — read this before writing any assertion:**
+  - `AddonPreferences` subclasses are NOT exposed on `bpy.types`. `hasattr(bpy.types, 'NO3D_AddonPreferences')` is **always False** (verified against a throwaway class outside this add-on). Use `NO3D_AddonPreferences.is_registered` instead. Operators and Panels DO appear on `bpy.types` — this quirk only bites `AddonPreferences`.
+  - Bare `mod.register()` in a harness does NOT populate `bpy.context.preferences.addons[key]` (Blender's real addon-enable path is what does that). To check that a preference *property* is declared, read it from the class: `NO3D_AddonPreferences.bl_rna.properties['<name>']` — not through `bpy.context.preferences.addons[...].preferences`.
 
 ## Source-of-truth paths
 
@@ -56,42 +60,42 @@ A reusable headless check that builds nothing but confirms the add-on enables wi
 
 - [ ] **Step 1: Write the harness script**
 
-Create `tools/check_register.sh`:
+Create `tools/check_register.sh`. The hyphenated repo dir (`no3d-asset-developer`) is not a valid Python module name, so we import via a temp symlink named `no3d_asset_developer`. The assertion uses `.is_registered` — see Global Constraints on why `hasattr(bpy.types, 'NO3D_AddonPreferences')` is wrong for AddonPreferences.
 
 ```bash
 #!/bin/bash
 # check_register.sh — headless proof that the add-on enables cleanly and its
-# key surfaces are registered. Installs the current working tree as a temp
-# extension into a throwaway Blender config, enables it, asserts, tears down.
+# key surfaces are registered. Registers the working tree directly via a
+# symlinked import (bypassing Blender's extension install path for speed),
+# asserts, tears down.
 #
 # Usage:  tools/check_register.sh
+# Env:    BLENDER (path to Blender binary; defaults to 5.2 Beta.app)
 # Exit 0 + "REGISTER_OK" on success; non-zero + traceback on failure.
 set -euo pipefail
 
-BLENDER="/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender"
+BLENDER="${BLENDER:-/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender}"
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 
 "$BLENDER" --factory-startup --background --python-expr "
 import bpy, sys, traceback
 PROJECT = r'''$PROJECT'''
 try:
-    # Install the working tree as an extension from disk, then enable it.
-    bpy.ops.extensions.package_install_files(
-        filepath='', directory=PROJECT, repo='user_default',
-        enable_on_install=True,
-    ) if False else None
-    # Simpler + version-stable: register the package directly by adding the
-    # parent dir to sys.path and importing, mirroring how Blender loads it.
-    import os
-    parent = os.path.dirname(PROJECT)
-    pkg = os.path.basename(PROJECT)
-    if parent not in sys.path:
-        sys.path.insert(0, parent)
-    mod = __import__(pkg)
+    # The repo dir name (no3d-asset-developer) has a hyphen — not a valid
+    # Python module name. Import it via a temp symlink with an underscore.
+    import os, tempfile
+    tmp = tempfile.mkdtemp()
+    link = os.path.join(tmp, 'no3d_asset_developer')
+    os.symlink(PROJECT, link)
+    if tmp not in sys.path:
+        sys.path.insert(0, tmp)
+    mod = __import__('no3d_asset_developer')
     mod.register()
-    # Assertions: the three surfaces + prefs presence.
-    assert hasattr(bpy.types, 'NO3D_AddonPreferences'), 'host prefs missing'
+    # AddonPreferences subclasses are NOT exposed on bpy.types (Blender
+    # behavior, reproduced with a throwaway class). Use is_registered.
+    assert mod.NO3D_AddonPreferences.is_registered, 'host prefs missing'
     mod.unregister()
+    assert not mod.NO3D_AddonPreferences.is_registered, 'host prefs still registered after unregister'
     print('REGISTER_OK')
 except Exception:
     traceback.print_exc()
@@ -106,26 +110,9 @@ Run: `chmod +x tools/check_register.sh`
 - [ ] **Step 3: Run it against the current (pre-merge) tree**
 
 Run: `tools/check_register.sh 2>&1 | tail -20`
-Expected: ends with `REGISTER_OK`. (This proves the harness works on the known-good baseline before we change anything. The `pkg = basename(PROJECT)` is `no3d-asset-developer` — a dir name with a hyphen is not importable, so if this fails on baseline, fall to Step 4.)
+Expected: ends with `REGISTER_OK`. This proves the harness works on the known-good baseline before we change anything.
 
-- [ ] **Step 4: If baseline import fails on the hyphenated dir name, use a symlink shim**
-
-The repo dir is `no3d-asset-developer` (hyphen → not a valid Python module name). Fix the harness to import via a temp symlink with an underscore name:
-
-```bash
-# Replace the sys.path/import block in the --python-expr with:
-    import os, tempfile
-    tmp = tempfile.mkdtemp()
-    link = os.path.join(tmp, 'no3d_asset_developer')
-    os.symlink(PROJECT, link)
-    if tmp not in sys.path:
-        sys.path.insert(0, tmp)
-    mod = __import__('no3d_asset_developer')
-```
-
-Re-run Step 3. Expected: `REGISTER_OK`.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tools/check_register.sh
@@ -512,23 +499,27 @@ Expected: ends with `REGISTER_OK`. This proves: host prefs register with all 15 
 
 - [ ] **Step 8: Assert the three surfaces exist (extend the check inline)**
 
-Run this one-off to confirm the operators/panel/menu registered:
+Run this one-off to confirm the operators/panel/menu registered. Note the prefs-prop check reads from the class's `bl_rna.properties`, NOT `bpy.context.preferences.addons[...].preferences` — the latter is not populated by a bare `mod.register()` call (see Global Constraints).
 
 ```bash
-"/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender" --factory-startup --background --python-expr "
+"${BLENDER:-/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender}" --factory-startup --background --python-expr "
 import bpy, sys, os, tempfile, traceback
 PROJECT=r'''$(pwd)'''
 tmp=tempfile.mkdtemp(); link=os.path.join(tmp,'no3d_asset_developer'); os.symlink(PROJECT,link)
 sys.path.insert(0,tmp)
 m=__import__('no3d_asset_developer'); m.register()
 try:
+    # Operators + Panels DO appear on bpy.types after register_class.
     assert hasattr(bpy.types,'CLAUDE_PAIR_PT_panel'), 'Claude panel missing'
     assert hasattr(bpy.types,'SAVE_AND_RELOAD_OT_run'), 'save_and_reload op missing'
     assert hasattr(bpy.types,'CLAUDE_PAIR_OT_pair_now'), 'pair_now op missing'
     assert not hasattr(bpy.types,'CLAUDE_PAIR_OT_reload'), 'reload op should be dropped'
-    p=bpy.context.preferences.addons['no3d_asset_developer'].preferences
+    # Prefs props: read declarations off the class (bl_rna.properties), not
+    # via bpy.context.preferences.addons[...] which needs Blender's real
+    # addon-enable path to populate.
+    props = m.NO3D_AddonPreferences.bl_rna.properties
     for prop in ('save_folder','iteration_digits','claude_command','port_range_start','verbose_logging'):
-        assert hasattr(p,prop), f'missing pref {prop}'
+        assert prop in props, f'missing pref {prop}'
     print('SURFACES_OK')
 finally:
     m.unregister()
