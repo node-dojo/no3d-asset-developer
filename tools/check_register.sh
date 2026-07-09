@@ -1,46 +1,84 @@
 #!/bin/bash
-# check_register.sh — headless proof that the add-on enables cleanly and its
-# key surfaces are registered. Registers the working tree directly via a
-# symlinked import (bypassing Blender's extension install path for speed),
-# asserts, tears down.
+# check_register.sh — headless proof that every extension in extensions/*/
+# registers and unregisters cleanly. Registers each in isolation via a fresh
+# --factory-startup Blender launch (headless + user add-ons often hangs, so
+# we run with a clean profile and register only the target).
 #
-# Uses --factory-startup so the user's normal enabled add-ons do NOT load —
-# headless Blender + user add-ons often hangs (modal popups, threads, or
-# network calls inside someone's register()). Only this add-on is registered.
+# AddonPreferences autodiscovery: scans the extension module's top-level for
+# an AddonPreferences subclass and asserts its is_registered. Extensions that
+# don't define one are still validated (register/unregister must not raise).
 #
-# Usage:  tools/check_register.sh
+# Usage:  tools/check_register.sh                       # all extensions
+#         tools/check_register.sh no3d_asset_developer  # one extension
 # Env:    BLENDER (path to Blender binary; defaults to 5.2 Beta.app)
-# Exit 0 + "REGISTER_OK" on success; non-zero + traceback on failure.
+# Exit 0 + "REGISTER_OK" on success; non-zero + traceback on first failure.
 set -euo pipefail
 
 BLENDER="${BLENDER:-/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender}"
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
+EXT_ROOT="$PROJECT/extensions"
 
-"$BLENDER" --factory-startup --background --python-expr "
+if [ ! -d "$EXT_ROOT" ]; then
+  echo "ERROR: $EXT_ROOT does not exist. Have you run the restructure yet?" >&2
+  exit 1
+fi
+
+# If an arg is given, only test that one extension. Otherwise, all.
+if [ $# -gt 0 ]; then
+  targets=("$EXT_ROOT/$1/")
+  if [ ! -d "${targets[0]}" ]; then
+    echo "ERROR: extension '$1' not found at ${targets[0]}" >&2
+    exit 1
+  fi
+else
+  # Guard against the glob matching literally when no extensions exist yet.
+  shopt -s nullglob
+  targets=("$EXT_ROOT"/*/)
+  shopt -u nullglob
+  if [ ${#targets[@]} -eq 0 ]; then
+    echo "ERROR: no extensions found under $EXT_ROOT" >&2
+    exit 1
+  fi
+fi
+
+for ext_dir in "${targets[@]}"; do
+  ext_name="$(basename "$ext_dir")"
+  echo "==> Checking $ext_name"
+  "$BLENDER" --factory-startup --background --python-expr "
 import bpy, sys, traceback
-PROJECT = r'''$PROJECT'''
+EXT_DIR = r'''${ext_dir%/}'''
+EXT_NAME = r'''$ext_name'''
 try:
-    # The repo dir name (no3d-asset-developer) contains a hyphen, which is
-    # not a valid Python module name. Import it via a temp symlink with an
-    # underscore name instead.
-    import os, tempfile
-    tmp = tempfile.mkdtemp()
-    link = os.path.join(tmp, 'no3d_asset_developer')
-    os.symlink(PROJECT, link)
-    if tmp not in sys.path:
-        sys.path.insert(0, tmp)
-    mod = __import__('no3d_asset_developer')
+    # Extension dirs are underscore-safe by convention (no hyphens in names
+    # like 'no3d_asset_developer'), so no symlink shim is needed here — the
+    # dir name IS the Python module name. The outer repo dir (hyphenated) is
+    # never added to sys.path.
+    import os
+    parent = os.path.dirname(EXT_DIR)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+    mod = __import__(EXT_NAME)
     mod.register()
-    # Assertions: prefs class registered. NOTE: AddonPreferences subclasses
-    # are NOT exposed as attributes on bpy.types (confirmed: this is general
-    # Blender behavior, reproduced with a throwaway AddonPreferences class
-    # outside this add-on — not an add-on bug). cls.is_registered is the
-    # correct, robust check for any bpy_struct subclass.
-    assert mod.NO3D_AddonPreferences.is_registered, 'host prefs missing'
+    # AddonPreferences autodiscovery — subclasses are NOT exposed on
+    # bpy.types (Blender behavior, reproduced with a throwaway class), so
+    # use is_registered on the class directly.
+    from bpy.types import AddonPreferences
+    prefs_cls = None
+    for name in dir(mod):
+        obj = getattr(mod, name, None)
+        if isinstance(obj, type) and issubclass(obj, AddonPreferences) and obj is not AddonPreferences:
+            prefs_cls = obj
+            break
+    if prefs_cls is not None:
+        assert prefs_cls.is_registered, f'{prefs_cls.__name__} not registered after register()'
     mod.unregister()
-    assert not mod.NO3D_AddonPreferences.is_registered, 'host prefs still registered after unregister'
-    print('REGISTER_OK')
+    if prefs_cls is not None:
+        assert not prefs_cls.is_registered, f'{prefs_cls.__name__} still registered after unregister()'
+    print(f'{EXT_NAME}_OK')
 except Exception:
     traceback.print_exc()
     sys.exit(1)
 "
+done
+
+echo "REGISTER_OK"

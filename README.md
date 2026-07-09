@@ -1,121 +1,60 @@
-# No3d Asset Developer
+# No3d Dev
 
-A Blender add-on for turning marked assets into clean, individually-packaged
-`.blend` files with metadata, thumbnails, and dev notes — built for maintaining
-a distributable asset library.
+A monorepo of Blender extensions authored by NO3D Tools, distributed as a
+single self-hosted extension repository. One subscription URL in Blender's
+Get Extensions gives you every extension below — installable and updatable
+independently.
 
-- **Version:** 3.0.0
+- **Repository URL:** `https://node-dojo.github.io/no3d-dev/index.json`
 - **Blender:** 5.0+
 - **License:** GPL-3.0-or-later
-- **Location:** Asset Browser context menu · 3D Viewport → N-Panel → *No3D Dev*
+- **Umbrella name in Blender:** *No3d Dev*
 
-## What it does
+## Subscribe (recommended)
 
-Marks, extracts, and exports individual assets from the current `.blend` into
-their own self-contained files, each in a named folder alongside a JSON
-metadata sidecar, a PNG thumbnail, and a description text file — ready to sync
-to a storefront or asset library.
+In Blender 5.0+:
 
-### Export pipeline
+1. Open **Edit → Preferences → Get Extensions → Repositories → +** (new remote).
+2. Paste `https://node-dojo.github.io/no3d-dev/index.json`.
+3. Refresh. Every extension in this repo appears in **Get Extensions**.
+4. Install the ones you want; each has its own preferences page and updates
+   on its own cadence.
 
-Assets are exported via **Datablock Write** — `bpy.data.libraries.write()` of the
-asset and its transitive dependencies. No subprocess, no template file: fast, and
-pose-library-native.
+## Extensions in this repo
 
-> **Internal / retained:** a second pipeline, **Template Append** (headless
-> Blender subprocess on `_export_template.blend` — appends the asset, strips
-> internal markings, purges orphans, preserves Scene + METRIC/mm units), is kept
-> in the code (`extraction_methods.py`, `blend_export.py`, `_export_single_asset.py`)
-> but is no longer exposed in the UI. Re-enable it from the Python console with
-> `wm.no3d_extraction_method = 'TEMPLATE_APPEND'`.
+### No3d Asset Developer
 
-### WIP folder auto-sync
+Turns marked assets into clean, individually-packaged `.blend` files with
+metadata, thumbnails, and dev notes — for maintaining a distributable asset
+library. Currently also bundles **Save & Reload** (one-click iteration save +
+relaunch) and **Claude Pair** (pairs a Blender instance with a Claude Code
+terminal via the official Blender MCP add-on) as subpackages; those will
+unmerge into their own top-level extensions in a later phase.
 
-Point the add-on at a working folder and assets are auto-extracted as you work:
+Location once installed: **Asset Browser → Context Menu** and
+**3D Viewport → N-Panel → No3D Dev**.
 
-- **On Mark** — a newly marked asset is extracted immediately
-- **On Save** — assets whose source changed are re-extracted
-- **On Rename** — the asset's WIP subfolder is renamed to match
-
-Each asset gets its own subfolder. The chosen folder is persisted to add-on
-preferences.
-
-### Dev notes
-
-A session-scoped notes system for tracking per-asset development context while
-authoring.
-
-## Install
-
-This is a Blender Extension. In Blender 5.0+:
-
-1. Download the packaged `.zip` (or build it — see below).
-2. Drag the `.zip` into Blender, or use *Edit → Preferences → Get Extensions →
-   Install from Disk*.
-3. Enable **No3d Asset Developer**.
-
-Set your default export/WIP folder in the add-on preferences and the N-panel.
-
-## Export output
-
-Each exported asset produces:
-
-```
-target/
-└── Asset_Name/
-    ├── Asset_Name.blend     # individual .blend, metric units preserved
-    ├── Asset_Name.json      # metadata (Shopify-compatible structure)
-    ├── icon_Asset_Name.png  # thumbnail / preview image
-    └── desc_Asset_Name.txt  # description text
-```
-
-The JSON is structured for storefront ingestion (title, handle, vendor,
-product_type, tags, variants with generated SKU, and namespaced metafields such
-as asset type, Blender version, and export date).
-
-## Building the extension
-
-With Blender on your `PATH`, from the repo root:
-
-```bash
-blender --command extension validate
-blender --command extension build
-```
-
-`build` produces the upload-ready `no3d_asset_developer-3.0.0.zip`. The `[build]`
-table in `blender_manifest.toml` controls exactly which files ship — dev-only
-files (tests, demos, planning docs) are excluded.
+Source: `extensions/no3d_asset_developer/`.
 
 ## Development
 
-- `__init__.py` — registration, preferences, WindowManager props
-- `operators.py` — export operators and directory pickers
-- `ui.py` — Asset Browser context menu + N-panel
-- `extraction_methods.py` — Method A / Method B dispatch
-- `blend_export.py` + `_export_single_asset.py` — Template Append subprocess
-- `wip_sync.py` — mark/save/rename auto-sync handlers
-- `utils.py` — metadata, thumbnails, JSON generation
-- `notes/` — dev notes system
+Each extension is a self-contained subdirectory under `extensions/`. Repo-wide
+tooling lives at the outer root:
 
-## Bundled tools
+- `tools/check_register.sh` — headless register/unregister gate; iterates
+  every extension. Must print `REGISTER_OK` after any registration-touching
+  change.
+- `tools/build_all.sh` — headless `extension build` per extension into `dist/`.
+- `tools/publish_repo.sh` — builds all extensions, aggregates zips, generates
+  the static repo `index.json`, force-pushes to gh-pages.
 
-Beyond asset export, this add-on bundles two macOS workflow tools:
-
-### Save & Reload
-`File → Save and Reload` (or **Cmd+Shift+R** in the 3D View) saves the current
-`.blend` as the next iteration (`.001`, `.002`, …) then quits and relaunches
-this Blender instance with the saved file. Other running Blender instances are
-untouched. Configure the save folder, iteration padding, and a confirm-prompt in
-the add-on preferences. macOS only.
-
-### Claude Pair
-The **"Claude"** tab in the 3D-viewport N-panel pairs this Blender instance with
-a Claude Code terminal session over the official Blender MCP add-on. "Pair Now"
-opens an iTerm2 window bound to a free MCP port; "Re-pair & Resume" re-attaches
-the prior conversation after a restart. Requires the official Blender MCP add-on
-installed separately. macOS / iTerm2 only.
+For contributor / AI-agent onboarding, read `AGENTS.md` at the repo root
+before touching code. It carries the non-negotiables, Blender quirks, and
+the cross-extension conventions (classname prefixes, `bpy.ops`-only for
+cross-extension calls, no Python imports across extensions).
 
 ## License
 
-Copyright (C) 2026 The Well Tarot, LLC. Released under the GNU General Public
-License v3.0 or later. See [LICENSE](./LICENSE).
+Copyright (C) 2026 The Well Tarot, LLC. Every extension in this repo is
+released under the GNU General Public License v3.0 or later. See
+[LICENSE](./LICENSE).

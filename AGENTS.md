@@ -7,66 +7,109 @@ truth — it applies to all agents, not just Claude.
 
 ## What this is
 
-Blender **extension** (not a plain Python package). Distributed two ways:
+**No3d Dev** — a monorepo hosting multiple independent Blender extensions,
+served as a single self-hosted extension repository. Not itself a Blender
+extension; each subdirectory under `extensions/` is one installable extension
+with its own manifest, `AddonPreferences`, version, and release cadence.
 
-- As a zipped extension on Gumroad — product id `MF2z7ZAjY-W9p4b_KOLjvw==`
-- As a self-hosted extension repo at `node-dojo.github.io/no3d-asset-developer/index.json`
+- Extension repository URL: `https://node-dojo.github.io/no3d-dev/index.json`
+- The GitHub repo is `github.com/node-dojo/no3d-dev` (renamed from
+  `no3d-asset-developer` in v4.0.0)
+- The local working directory may still be at
+  `/Users/joebowers/Projects/no3d-asset-developer` — GitHub's redirect keeps
+  the old remote URL working; the folder name is cosmetic
 
-Both remote Blender installs (home + work Macs) subscribe to the extension
-repo via `repo_registration.py` and auto-pull updates.
+Extensions currently in the repo:
+
+- `no3d_asset_developer` — asset export pipeline; currently still bundles
+  Save & Reload and Claude Pair as internal subpackages (unmerge planned in
+  Steps 4–5 of the monorepo restructure)
+- (future) `no3d_agent_bridge`, `no3d_save_reload`, `no3d_claude_pair`
 
 ## Non-negotiables (read before editing)
 
-- **One `AddonPreferences` for the whole add-on.** The host class is
-  `NO3D_AddonPreferences` in `__init__.py`. Subpackages MUST read prefs via
-  `HOST_PACKAGE = __package__.rsplit(".", 1)[0]` and
-  `bpy.context.preferences.addons[HOST_PACKAGE].preferences` — never define
-  a second `AddonPreferences`, never bare `__package__` in a subpackage,
-  never hardcode `"no3d_asset_developer"`.
+- **One `AddonPreferences` per sub-add-on.** Each extension in `extensions/`
+  owns its own preferences class. No `HOST_PACKAGE` gymnastics — that rule
+  died with the meta-add-on shape in v4.0.0. If you see a subpackage inside
+  an extension needing prefs, that subpackage still reads
+  `bpy.context.preferences.addons[__package__.rsplit(".", 1)[0]].preferences`
+  (where the rsplit gets you back up to the extension package), but that's
+  an internal-to-extension mechanism, not a cross-extension one.
+- **No cross-extension Python imports.** An extension may call another via
+  `bpy.ops.<other_extension>.<op>()` and must degrade gracefully if the
+  target isn't installed/enabled. Never `from other_extension import …`.
 - **After any registration-touching change, run `tools/check_register.sh`.**
-  It must print `REGISTER_OK`. This is the gate.
-- **Version discipline.** `blender_manifest.toml`'s `version` and
-  `__init__.py`'s `bl_info["version"]` must agree. Bump both together, always.
+  It iterates every extension and must print `REGISTER_OK` after listing each
+  as `<ext_name>_OK`. This is the gate.
+- **Version discipline, per extension.** Each extension's
+  `blender_manifest.toml` `version` and `__init__.py` `bl_info["version"]`
+  must agree, bumped together, always.
 - **Don't rebuild what's already working:**
-  - `repo_registration.py` — work-Mac auto-pull leg
-  - `tools/publish_repo.sh` — gh-pages distribution leg
+  - `extensions/no3d_asset_developer/repo_registration.py` — subscribes new
+    installs to the No3d Dev extension repo. Already works.
+  - `tools/publish_repo.sh` — builds all + generates index + force-pushes
+    gh-pages. Already works.
   - The Supabase WIP-library publisher at `<The Well Code>/no3d-remote-publish/`
     is a *different* pipeline (ships asset `.blend` files, not add-on code) —
     do NOT conflate.
-- **Platform: macOS only** for `save_reload/` and `claude_pair/` features. No
-  cross-platform guards; operators fail gracefully via
-  `self.report({"ERROR"}, …)`.
+- **Platform: macOS only** for the Save & Reload and Claude Pair features
+  currently living inside `no3d_asset_developer/`. No cross-platform guards;
+  operators fail gracefully via `self.report({"ERROR"}, …)`.
 
 ## Blender quirks / gotchas
 
-- **Hyphenated repo dir isn't importable.** `no3d-asset-developer` isn't a
-  valid Python module name. `check_register.sh` imports via a temp symlink to
-  `no3d_asset_developer/`. Any new headless script that imports the package
-  needs the same shim.
+- **Outer repo dir is hyphenated; extension dirs are underscore-safe.** The
+  outer working directory (`no3d-asset-developer` on disk today,
+  `no3d-dev` post-rename cosmetics) has a hyphen and isn't a valid Python
+  module name — but that doesn't matter because we never add it to
+  `sys.path`. Each `extensions/<name>/` is underscore-safe by convention
+  (`no3d_asset_developer`, `no3d_agent_bridge`, etc.); the extension dir
+  name IS the Python module name. `check_register.sh` adds
+  `extensions/` (not the outer repo dir) to `sys.path` and imports the
+  extension directly. No symlink shim needed at the extension level.
 - **`AddonPreferences` subclasses are NOT exposed on `bpy.types`.** Reproduced
-  outside this add-on with a throwaway class. `hasattr(bpy.types, 'NO3D_AddonPreferences')`
-  is **always False and misleading** — use `NO3D_AddonPreferences.is_registered`.
-  Operators and Panels DO appear on `bpy.types` after `register_class`; this
-  quirk only bites for `AddonPreferences`.
+  outside this add-on with a throwaway class. `hasattr(bpy.types, '<NAME>')`
+  is **always False and misleading** for AddonPreferences subclasses — use
+  `<PrefsClass>.is_registered`. Operators and Panels DO appear on `bpy.types`
+  after `register_class`; this quirk only bites for `AddonPreferences`.
 - **Bare `mod.register()` doesn't populate `bpy.context.preferences.addons[key]`.**
   Blender's real addon-enable path is what registers the addon entry; a
   lightweight harness that only calls `register_class` on the prefs class
   won't. To check that a preference *property* is declared, read it from the
-  class itself: `NO3D_AddonPreferences.bl_rna.properties['<name>']`, not
-  through `bpy.context.preferences.addons[...]`.
+  class itself: `<PrefsClass>.bl_rna.properties['<name>']`, not through
+  `bpy.context.preferences.addons[...]`.
 - **Headless Blender + enabled user add-ons often hangs.** Learned the hard
   way. Any custom `--background --python …` run should start with
   `--factory-startup` (loads no user prefs, so no user-enabled add-ons come
   along) and register only what the harness needs. If you're launching
   Blender headlessly with the user's normal config, expect intermittent hangs
   where an add-on's `register()` opens a modal / touches the network / spawns
-  a thread. Rule of thumb: **headless = --factory-startup + only-the-add-on-under-test**.
+  a thread. Rule of thumb: **headless = --factory-startup + only-the-extension-under-test**.
   This is why `check_register.sh` uses `--factory-startup` and directly
-  `mod.register()`s only this add-on.
+  `mod.register()`s only the target extension.
 - **Blender binary path is env-overridable.** Default is
-  `/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender`. Shell scripts
-  should honor `${BLENDER:-<default>}` so machines with a stable Blender
+  `/Applications/Blender 5.2 Beta.app/Contents/MacOS/Blender`. Every shell
+  script honors `${BLENDER:-<default>}` so machines with a stable Blender
   install (e.g. the work Mac when 5.2 goes stable) don't break.
+
+## Cross-extension conventions
+
+- **Classname prefixes.** Multiple sub-add-ons can register panels into the
+  same `NO3D Dev` N-panel tab (Blender merges by `bl_category`), but every
+  registered class needs a globally unique classname across all installed
+  extensions. Use per-extension prefixes:
+  - `NO3D_AD_*` — no3d_asset_developer
+  - `NO3D_SR_*` — no3d_save_reload
+  - `NO3D_CP_*` — no3d_claude_pair
+  - `NO3D_AB_*` — no3d_agent_bridge
+- **Cross-extension calls via `bpy.ops` only.** Fine to call
+  `bpy.ops.no3d_asset_developer.export_single_asset()` from another
+  sub-add-on, but wrap in try/except so the caller degrades if the target
+  isn't installed/enabled. No `from other_extension import …`.
+- **Shared code.** Duplicate small utilities per-extension (< 200 lines).
+  Bigger shared machinery (like the template-append export pipeline in
+  `extraction_methods.py` / `blend_export.py` / `_export_single_asset.py`)
+  lives in *one* extension and is called via operators from elsewhere.
 
 ## Workflow: spec-driven development
 
@@ -101,35 +144,53 @@ task report and update the spec afterward.
 ## Ship pipeline (design in progress)
 
 `docs/superpowers/specs/2026-07-08-ship-pipeline-design.md` describes the
-deterministic `tools/ship.sh` spine (build → GitHub tag + gh-pages → Gumroad
-upload → append to vault ship log). Not built yet. Once it exists, the flow
-is: agent merges the feature, runs `tools/ship.sh --version X.Y.Z --notes …`.
+deterministic `tools/ship.sh` spine. Not built yet. Post-monorepo, it grows
+a per-extension argument: `ship.sh <extension_id> <version> [--notes …]`.
+Preflight checks the target extension's manifest ↔ bl_info agreement; bumps
+its two version fields; runs `build_all.sh`; runs `publish_repo.sh`; commits
++ tags + pushes; appends to the vault ship log. Gumroad publishing is parked
+per Joe's decision — `ship.sh` lands with `--no-gumroad` as default.
 
 Session logs live in the vault, not the repo:
 `$VAULT_001/PROJECTS/no3d tools/ship-log.md`. Absolute dates only.
 
 ## Directory map
 
-- `__init__.py` — host registration, `NO3D_AddonPreferences`, `bl_info`
-- `operators.py`, `ui.py` — export operators + N-panel + Asset Browser menu
-- `blender_manifest.toml` — extension manifest (version, build paths,
-  permissions)
-- `wip/`, `notes/`, `save_reload/`, `claude_pair/` — feature subpackages
-- `extraction_methods.py`, `blend_export.py`, `_export_single_asset.py` —
-  retained internal template-append pipeline (not UI-exposed; re-enable with
-  `wm.no3d_extraction_method = 'TEMPLATE_APPEND'`)
-- `repo_registration.py` — self-subscribe to the extension repo on load
-- `tools/check_register.sh` — headless registration gate
-- `tools/publish_repo.sh` — gh-pages distribution (works, do not rebuild)
-- `docs/superpowers/{specs,plans}/` — design docs + implementation plans
-- `.superpowers/sdd/` — active task briefs, reports, progress ledger
+```
+no3d-dev/                                # repo root (folder still named
+│                                        # no3d-asset-developer locally)
+├── extensions/
+│   └── no3d_asset_developer/            # first sub-add-on
+│       ├── blender_manifest.toml
+│       ├── __init__.py                  # bl_info, NO3D_AddonPreferences
+│       ├── operators.py, ui.py, utils.py
+│       ├── wip/, notes/                 # internal subpackages
+│       ├── save_reload/, claude_pair/   # still merged; unmerge in Steps 4-5
+│       ├── extraction_methods.py + blend_export.py + _export_single_asset.py
+│       │                                # retained internal template-append
+│       │                                # pipeline; re-enable via
+│       │                                # wm.no3d_extraction_method
+│       └── repo_registration.py         # subscribes new installs to No3d Dev
+├── tools/
+│   ├── check_register.sh                # iterates extensions/*/; the gate
+│   ├── build_all.sh                     # headless extension build per ext
+│   └── publish_repo.sh                  # aggregates zips + gh-pages push
+├── docs/superpowers/{specs,plans}/      # design specs + implementation plans
+├── .superpowers/sdd/                    # active task briefs, reports, ledger
+├── AGENTS.md                            # this file
+├── README.md                            # user-facing
+├── HANDOFF.md                           # historical snapshot (pre-restructure)
+├── LICENSE
+└── dist/                                # gitignored, populated by build_all
+```
 
 ## Current state / getting oriented
 
 ```bash
 git status && git branch --show-current
 git log --oneline -10
-cat .superpowers/sdd/progress.md  # what the current SDD run is on
+cat .superpowers/sdd/progress.md         # what the current SDD run is on
+tools/check_register.sh                  # should print REGISTER_OK
 ```
 
 ## Lessons / gotchas (append here after corrections)
@@ -142,39 +203,17 @@ lesson stabilizes, promote it into the section above (Blender quirks or
 Non-negotiables) and remove it from this list.
 -->
 
-- Do not write `hasattr(bpy.types, 'NO3D_AddonPreferences')` — always False
-  for `AddonPreferences` subclasses. Use `is_registered` (see Gotchas).
+- Do not write `hasattr(bpy.types, '<PrefsClass>')` — always False for
+  `AddonPreferences` subclasses. Use `is_registered` (see Gotchas).
 - Do not check prefs *props* via `bpy.context.preferences.addons[key]` in a
   bare-harness context — read them from `<PrefsClass>.bl_rna.properties`.
-- Headless Blender with the user's normal add-ons enabled often hangs — always
-  `--factory-startup` in scripts, and register only what the harness needs.
-- **`publish_repo.sh` keeps prior version zips → the remote index serves
-  overlapping-range duplicates (both have `blender_version_min=5.0.0`,
-  `blender_version_max=null`) → Blender's resolver installs the FIRST listed,
-  i.e. the OLDER version.** Symptom: "update from remote" pulls an old version
-  even though a newer one is published. Fix used 2026-07-08: `rm` the stale zip
-  from `~/.no3d-extension-repo/`, re-run `extension server-generate`, force-push
-  `gh-pages`. The pipeline (`ship.sh`) must PRUNE old zips (or pin
-  `blender_version_max`) so the repo serves exactly one current build per
-  Blender-version band. This is a top-priority `ship.sh` requirement.
-- **Merged add-on vs. still-installed standalone add-ons COLLIDE.** After
-  merging Claude Pair + Save & Reload into the add-on, the standalone
-  `claude_pair` and `save_and_reload` extensions were still enabled and
-  register the SAME `bl_idname`s (`claude_pair.pair_now`, `save_and_reload.run`,
-  the `CLAUDE_PAIR_PT_panel`, etc.). Blender does last-registered-wins, but
-  running both is genuinely conflicting, and the standalone's now-dropped
-  operators (`CLAUDE_PAIR_OT_reload`/`_uninstall`) linger on `bpy.types` as
-  ghosts. Disabling a standalone LIVE (mid-session) after the merged copy
-  re-registered over it throws `unregister_class(...): missing bl_rna attribute`
-  (its classes were already yanked out from under it) — messy but non-fatal.
-  **Migration rule:** disable/uninstall the standalones BEFORE (or instead of)
-  enabling the merged add-on, then RESTART Blender to clear ghost registrations.
-  Never rely on live disable to fully clean up. A future `ship.sh`/migration
-  helper should detect and warn about enabled standalones.
-- Disabling standalone Claude Pair mid-session tears down the MCP server it
-  runs (the port that hosts the paired Claude session). Do it at a restart, not
-  live, unless you intend to orphan the current session.
-- `bpy.context.preferences.use_preferences_save` is often OFF here — enablement
-  changes made via `addon_disable`/`addon_enable` do NOT persist across restart
-  unless you explicitly `bpy.ops.wm.save_userpref()`. Always save after a
-  migration you need to survive a restart.
+- Headless Blender with the user's normal add-ons enabled often hangs —
+  always `--factory-startup` in scripts, and register only what the harness
+  needs.
+- The outer working-tree folder can stay named anything (it's not on
+  `sys.path`); what matters is that every `extensions/<name>/` dir name is
+  underscore-safe because THAT is the Python module name.
+- `LICENSE` and `README.md` at the outer root don't get bundled into any
+  extension zip — the manifest's `[build].paths` are relative to
+  `--source-dir` which is the extension's own dir. Add a build-time copy
+  step in `build_all.sh` if a future release needs them inside the zip.

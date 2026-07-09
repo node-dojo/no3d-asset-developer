@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "no3d_asset_developer"
-version = "3.2.0"
+version = "4.0.0"
 name = "No3d Asset Developer"
 tagline = "Export clean per-asset .blend files with metadata & thumbnails"
 maintainer = "Joe Bowers <joe@welltarot.com>"
@@ -62,6 +62,10 @@ paths = [
   "save_reload/__init__.py",
   "save_reload/save_op.py",
   "save_reload/helper.py",
-  "LICENSE",
-  "README.md",
 ]
+
+# LICENSE and README.md live at the outer monorepo root
+# (../../LICENSE and ../../README.md) — they don't ship in the extension zip.
+# Blender validates the license from the SPDX identifier above, not from a
+# bundled LICENSE file. If the outer root files are ever needed inside the
+# zip, add a build-time copy step to tools/build_all.sh.

@@ -18,11 +18,15 @@ import os
 
 import bpy
 
-REPO_NAME = "NO3D Tools"
-REPO_MODULE = "no3d_tools"
-REMOTE_URL = "https://node-dojo.github.io/no3d-asset-developer/index.json"
+REPO_NAME = "No3d Dev"
+REPO_MODULE = "no3d_dev"
+REMOTE_URL = "https://node-dojo.github.io/no3d-dev/index.json"
 
-_MARKER = "no3d_repo_registered"
+# Marker versioned in v4.0.0 to force re-registration once, so the new umbrella
+# URL is picked up on fresh installs even if the pre-4.0.0 marker exists.
+# Existing installs on the URL-migration Option B path (manual resubscribe)
+# are unaffected because their old URL is a different remote_url anyway.
+_MARKER = "no3d_repo_registered_v4"
 
 
 def _marker_path() -> str:
@@ -76,7 +80,7 @@ def _ensure_repo() -> None:
         except Exception:
             pass
 
-    print("[no3d_asset_developer] Registered update repository: %s" % REMOTE_URL)
+    print("[no3d_asset_developer] Registered update repository: %s (%s)" % (REMOTE_URL, REPO_NAME))
 
 
 def _deferred() -> None:
