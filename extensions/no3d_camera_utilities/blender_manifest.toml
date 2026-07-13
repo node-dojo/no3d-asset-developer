@@ -24,7 +24,7 @@ copyright = [
 # The add-on renders images to disk (mesh camera renders, optional Obsidian
 # copies) and reads user-selected output paths.
 [permissions]
-files = "Renders mesh-camera images to user-selected output paths and (optionally) copies them to a configured Obsidian assets folder"
+files = "Write rendered images to user-selected output paths"
 
 [build]
 paths = [
